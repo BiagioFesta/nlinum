@@ -94,6 +94,8 @@ face."
 (defvar nlinum--using-right-margin nil)
 (make-variable-buffer-local 'nlinum--using-right-margin)
 
+(defvar nlinum--last-buffer nil)
+
 ;;;###autoload
 (define-minor-mode nlinum-mode
   "Toggle display of line numbers in the left margin (Linum mode).
@@ -108,6 +110,7 @@ Linum mode is a buffer-local minor mode."
   (remove-hook 'text-scale-mode-hook #'nlinum--setup-window :local)
   (remove-hook 'after-change-functions #'nlinum--after-change :local)
   (remove-hook 'post-command-hook #'nlinum--current-line-update :local)
+  (remove-hook 'buffer-list-update-hook #'nlinum--refontify-last-buffer :local)
   (remove-hook 'pre-redisplay-functions #'nlinum--check-narrowing :local)
   (kill-local-variable 'nlinum--line-number-cache)
   (kill-local-variable 'nlinum--last-point-min)
@@ -128,8 +131,9 @@ Linum mode is a buffer-local minor mode."
     (add-hook 'window-configuration-change-hook #'nlinum--setup-window nil t)
     (add-hook 'after-change-functions #'nlinum--after-change nil :local)
     (add-hook 'pre-redisplay-functions #'nlinum--check-narrowing nil :local)
-    (if nlinum-highlight-current-line
-        (add-hook 'post-command-hook #'nlinum--current-line-update nil :local))
+    (when nlinum-highlight-current-line
+      (add-hook 'buffer-list-update-hook #'nlinum--refontify-last-buffer :local)
+      (add-hook 'post-command-hook #'nlinum--current-line-update nil :local))
     (jit-lock-register #'nlinum--region :contextual))
   (nlinum--setup-windows))
 
@@ -181,6 +185,7 @@ Linum mode is a buffer-local minor mode."
              (list new-margin (cdr cur-margins)))))))
 
 (defun nlinum--setup-windows ()
+  (setq nlinum--last-buffer (current-buffer))
   (dolist (win (get-buffer-window-list nil nil t))
     (with-selected-window win (nlinum--setup-window))))
 
@@ -336,7 +341,7 @@ Used by the default `nlinum-format-function'."
   :group 'linum)
 
 (defvar nlinum-format-function
-  (lambda (line width)
+  (lambda (line width window buffer)
     (let* ((is-current-line (= line nlinum--current-line))
            (str (format nlinum-format line)))
       (when (< (length str) width)
@@ -344,7 +349,8 @@ Used by the default `nlinum-format-function'."
         (setq str (concat (make-string (- width (length str)) ?\ ) str)))
       (put-text-property 0 width 'face
                          (if (and nlinum-highlight-current-line
-                                  is-current-line)
+                                  is-current-line
+                                  (eq buffer (window-buffer window)))
                              'nlinum-current-line
                            'linum)
                          str)
@@ -367,7 +373,7 @@ it may cause the margin to be resized and line numbers to be recomputed.")
             (and (not (eobp)) (< (point) limit)
                  (let* ((ol (make-overlay (point) (1+ (point))))
                         (str (funcall nlinum-format-function
-                                      line nlinum--width))
+                                      line nlinum--width (selected-window) (current-buffer)))
                         (width (string-width str))
                         (margin (if nlinum--using-right-margin
                                     'right-margin 'left-margin)))
@@ -387,6 +393,17 @@ it may cause the margin to be resized and line numbers to be recomputed.")
                    (zerop (forward-line 1))))))))
   ;; (setq nlinum--desc (format "-%d" (nlinum--ol-count)))
   nil)
+
+(defun nlinum--refontify-last-buffer ()
+  "Force refontify of two buffers:
+* The buffer displayed in the selected window.
+* The buffer displayed in the previous selected window."
+  (let ((new-buffer (window-buffer)))
+    (jit-lock-refontify)
+    (if nlinum--last-buffer
+        (with-current-buffer nlinum--last-buffer
+          (jit-lock-refontify)))
+    (setq nlinum--last-buffer new-buffer)))
 
 ;;;###autoload
 (define-globalized-minor-mode global-nlinum-mode nlinum-mode
