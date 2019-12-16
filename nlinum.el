@@ -400,7 +400,7 @@ it may cause the margin to be resized and line numbers to be recomputed.")
 * The buffer displayed in the previous selected window."
   (let ((new-buffer (window-buffer)))
     (jit-lock-refontify)
-    (if nlinum--last-buffer
+    (if (and nlinum--last-buffer (buffer-live-p nlinum--last-buffer))
         (with-current-buffer nlinum--last-buffer
           (jit-lock-refontify)))
     (setq nlinum--last-buffer new-buffer)))
